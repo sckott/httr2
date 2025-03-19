@@ -27,6 +27,7 @@
 #' @export
 #' @param resp,con A streaming [response] created by [req_perform_connection()].
 #' @param kb How many kilobytes (1024 bytes) of data to read.
+#' @inheritParams req_perform
 #' @order 1
 #' @examples
 #' req <- request(example_url()) |>
@@ -45,9 +46,18 @@
 #'   lines <- con |> resp_stream_lines(2)
 #' }
 #' close(con)
-resp_stream_raw <- function(resp, kb = 32) {
+resp_stream_raw <- function(
+  resp,
+  kb = 32,
+  mock = getOption("httr2_mock", NULL)
+) {
   check_streaming_response(resp)
   conn <- resp$body
+
+  if (!is.null(mock)) {
+    mock <- as_function(mock)
+    return(mock_resp_raw(resp, mock()))
+  }
 
   out <- readBin(conn, raw(), kb * 1024)
   if (resp_stream_show_body(resp)) {
@@ -63,11 +73,22 @@ resp_stream_raw <- function(resp, kb = 32) {
 #' @param warn Like [readLines()]: warn if the connection ends without a final
 #'   EOL.
 #' @order 1
-resp_stream_lines <- function(resp, lines = 1, max_size = Inf, warn = TRUE) {
+resp_stream_lines <- function(
+  resp,
+  lines = 1,
+  max_size = Inf,
+  warn = TRUE,
+  mock = getOption("httr2_mock", NULL)
+) {
   check_streaming_response(resp)
   check_number_whole(lines, min = 0, allow_infinite = TRUE)
   check_number_whole(max_size, min = 1, allow_infinite = TRUE)
   check_logical(warn)
+
+  if (!is.null(mock)) {
+    mock <- as_function(mock)
+    return(mock_resp_lines(resp, mock()))
+  }
 
   if (lines == 0) {
     # If you want to do that, who am I to judge?
@@ -102,24 +123,28 @@ resp_stream_lines <- function(resp, lines = 1, max_size = Inf, warn = TRUE) {
 #' @rdname resp_stream_raw
 #' @order 1
 resp_stream_sse <- function(resp, max_size = Inf) {
-
   repeat {
-    event_bytes <- resp_boundary_pushback(resp, max_size, find_event_boundary, include_trailer = FALSE)
+    event_bytes <- resp_boundary_pushback(
+      resp,
+      max_size,
+      find_event_boundary,
+      include_trailer = FALSE
+    )
     if (is.null(event_bytes)) {
       return()
     }
 
     if (resp_stream_show_buffer(resp)) {
       log_stream(
-        cli::rule("Raw server sent event"), "\n",
+        cli::rule("Raw server sent event"),
+        "\n",
         rawToChar(event_bytes),
         prefix = "*  "
       )
     }
 
     event <- parse_event(event_bytes)
-    if (!is.null(event))
-      break
+    if (!is.null(event)) break
   }
 
   if (resp_stream_show_body(resp)) {
@@ -154,7 +179,12 @@ close.httr2_response <- function(con, ...) {
 
 resp_stream_oneline <- function(resp, max_size, warn, encoding) {
   repeat {
-    line_bytes <- resp_boundary_pushback(resp, max_size, find_line_boundary, include_trailer = TRUE)
+    line_bytes <- resp_boundary_pushback(
+      resp,
+      max_size,
+      find_line_boundary,
+      include_trailer = TRUE
+    )
     if (is.null(line_bytes)) {
       return(character())
     }
@@ -267,7 +297,12 @@ split_buffer <- function(buffer, split_at) {
 # @param include_trailer If TRUE, at the end of the response, if there are
 #   bytes after the last boundary, then return those bytes; if FALSE, then those
 #   bytes are discarded with a warning.
-resp_boundary_pushback <- function(resp, max_size, boundary_func, include_trailer) {
+resp_boundary_pushback <- function(
+  resp,
+  max_size,
+  boundary_func,
+  include_trailer
+) {
   check_streaming_response(resp)
   check_number_whole(max_size, min = 1, allow_infinite = TRUE)
 
@@ -280,10 +315,16 @@ resp_boundary_pushback <- function(resp, max_size, boundary_func, include_traile
   if (resp_stream_show_buffer(resp)) {
     log_stream(cli::rule("Buffer"), prefix = "*  ")
     print_buffer <- function(buf, label) {
-      log_stream(label, ": ", paste(as.character(buf), collapse = " "), prefix = "*  ")
+      log_stream(
+        label,
+        ": ",
+        paste(as.character(buf), collapse = " "),
+        prefix = "*  "
+      )
     }
   } else {
-    print_buffer <- function(buf, label) {}
+    print_buffer <- function(buf, label) {
+    }
   }
 
   # Read chunks until we find an event or reach the end of input
@@ -310,7 +351,9 @@ resp_boundary_pushback <- function(resp, max_size, boundary_func, include_traile
     }
 
     # We didn't have enough data. Attempt to read more
-    chunk <- readBin(resp$body, raw(),
+    chunk <- readBin(
+      resp$body,
+      raw(),
       # Don't let us exceed the max size by more than one byte; we do allow the
       # one extra byte so we know to error.
       n = min(chunk_size, max_size - length(buffer) + 1)
@@ -326,7 +369,9 @@ resp_boundary_pushback <- function(resp, max_size, boundary_func, include_traile
           if (include_trailer) {
             return(buffer)
           } else {
-            cli::cli_warn("Premature end of input; ignoring final partial chunk")
+            cli::cli_warn(
+              "Premature end of input; ignoring final partial chunk"
+            )
             return(NULL)
           }
         }
@@ -347,7 +392,6 @@ resp_boundary_pushback <- function(resp, max_size, boundary_func, include_traile
 
 # https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
 parse_event <- function(event_data) {
-
   if (is.raw(event_data)) {
     # Streams must be decoded using the UTF-8 decode algorithm.
     str_data <- rawToChar(event_data)
@@ -428,10 +472,11 @@ parse_event <- function(event_data) {
 
 # Helpers ----------------------------------------------------
 
-
-check_streaming_response <- function(resp,
-                                     arg = caller_arg(resp),
-                                     call = caller_env()) {
+check_streaming_response <- function(
+  resp,
+  arg = caller_arg(resp),
+  call = caller_env()
+) {
   check_response(resp, arg = arg, call = call)
 
   if (resp_body_type(resp) != "stream") {

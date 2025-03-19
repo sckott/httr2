@@ -9,9 +9,15 @@
 \alias{resp_stream_is_complete}
 \title{Read a streaming body a chunk at a time}
 \usage{
-resp_stream_raw(resp, kb = 32)
+resp_stream_raw(resp, kb = 32, mock = getOption("httr2_mock", NULL))
 
-resp_stream_lines(resp, lines = 1, max_size = Inf, warn = TRUE)
+resp_stream_lines(
+  resp,
+  lines = 1,
+  max_size = Inf,
+  warn = TRUE,
+  mock = getOption("httr2_mock", NULL)
+)
 
 resp_stream_sse(resp, max_size = Inf)
 
@@ -25,6 +31,11 @@ resp_stream_is_complete(resp)
 \item{resp, con}{A streaming \link{response} created by \code{\link[=req_perform_connection]{req_perform_connection()}}.}
 
 \item{kb}{How many kilobytes (1024 bytes) of data to read.}
+
+\item{mock}{A mocking function. If supplied, this function is called
+with the request. It should return either \code{NULL} (if it doesn't want to
+handle the request) or a \link{response} (if it does). See \code{\link[=with_mock]{with_mock()}}/
+\code{local_mock()} for more details.}
 
 \item{lines}{The maximum number of lines to return at once.}
 
